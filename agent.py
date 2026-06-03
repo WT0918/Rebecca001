@@ -1,35 +1,57 @@
 import yfinance as yf
-import pandas_ta as ta
 import pandas as pd
 
 print("啟動 Agent：開始抓取 0050.TW 歷史資料...")
 
-# 1. 抓取過去 3 個月的資料，確保有足夠天數計算 KD
-df = yf.download("0050.TW", period="3mo")
+# 1. 抓取半年資料，讓 KD 值的運算有足夠的歷史資料進行平滑
+df = yf.download("0050.TW", period="6mo")
 
 if df.empty:
     print("無法抓取資料，請檢查網路或股票代號。")
 else:
-    # 2. 計算 5日 KD 值
-    # k=5 代表 5日 RSV, d=3 代表 K值平滑, smooth_k=3 代表 D值平滑
-    stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=5, d=3, smooth_k=3)
+    # 處理 yfinance 新版可能產生的雙層欄位問題
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+
+    # ==========================================
+    # 2. 自行計算 KD 值 (完全不需要依賴 pandas-ta)
+    # ==========================================
+    rsv_period = 5 # 5日 RSV
     
-    # 3. 將計算結果合併回原資料表
-    df = pd.concat([df, stoch], axis=1)
+    # 計算 RSV = (收盤價 - N日最低價) / (N日最高價 - N日最低價) * 100
+    roll_low = df['Low'].rolling(window=rsv_period).min()
+    roll_high = df['High'].rolling(window=rsv_period).max()
+    df['RSV'] = 100 * (df['Close'] - roll_low) / (roll_high - roll_low)
     
-    # pandas_ta 產生的欄位名稱通常為 STOCHk_5_3_3, STOCHd_5_3_3
-    # 我們用程式自動尋找包含 'STOCHk' 的欄位，避免版本差異導致名稱不同
-    k_col = [col for col in df.columns if 'STOCHk' in col][0]
-    d_col = [col for col in df.columns if 'STOCHd' in col][0]
+    # 將前幾天無法計算 RSV 的空值填入 50
+    df['RSV'] = df['RSV'].fillna(50)
+
+    # 計算 K 與 D (台灣市場標準平滑權重為 1/3 與 2/3)
+    k_list = [50] # 初始 K 值設定為 50
+    d_list = [50] # 初始 D 值設定為 50
     
-    # 4. 取得最新一天的資料 (iloc[-1] 代表最後一列)
-    # 取出數值，使用 .item() 確保提取出純數字 (避免 yfinance 新版格式問題)
+    for rsv in df['RSV'].iloc[1:]:
+        k = (k_list[-1] * (2/3)) + (rsv * (1/3))
+        d = (d_list[-1] * (2/3)) + (k * (1/3))
+        k_list.append(k)
+        d_list.append(d)
+        
+    df['K'] = k_list
+    df['D'] = d_list
+
+    # ==========================================
+    # 3. 取得最新結果並進行條件判斷
+    # ==========================================
     latest_date = df.index[-1].strftime("%Y-%m-%d")
-    latest_close = float(df['Close'].iloc[-1].iloc[0]) if isinstance(df['Close'], pd.DataFrame) else float(df['Close'].iloc[-1])
-    latest_k = float(df[k_col].iloc[-1])
-    latest_d = float(df[d_col].iloc[-1])
     
-    # 5. 印出報表
+    latest_close = float(df['Close'].iloc[-1])
+    latest_k = float(df['K'].iloc[-1])
+    latest_d = float(df['D'].iloc[-1])
+    
+    yest_k = float(df['K'].iloc[-2])
+    yest_d = float(df['D'].iloc[-2])
+
+    # 印出報表
     print("\n=======================================")
     print(f"📈 觀察日期: {latest_date}")
     print(f"🎯 觀察標的: 0050 (元大台灣50)")
@@ -38,10 +60,7 @@ else:
     print(f"📊 5日 D 值: {latest_d:.2f}")
     print("=======================================\n")
     
-    # 6. 條件判斷：K < 35 且 黃金交叉
-    yest_k = float(df[k_col].iloc[-2])
-    yest_d = float(df[d_col].iloc[-2])
-    
+    # 條件判斷：K < 35 且 黃金交叉 (K由下往上穿過D)
     if latest_k < 35 and (latest_k > latest_d) and (yest_k <= yest_d):
         print("🔥【訊號觸發】符合 K < 35 且 K 值由下往上穿過 D 值！")
     else:
