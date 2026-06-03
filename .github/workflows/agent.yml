@@ -21,7 +21,7 @@ jobs:
     - name: 2. 建立 Python 環境
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.12'
 
     - name: 3. 安裝所需套件
       run: |
