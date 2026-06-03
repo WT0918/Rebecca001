@@ -1,0 +1,32 @@
+name: 股票觀察 Agent
+
+# 設定觸發條件
+on:
+  schedule:
+    # GitHub 使用 UTC 時間。台灣時間下午 2:00 = UTC 早上 6:00
+    # 1-5 代表週一到週五
+    - cron: '0 6 * * 1-5'
+  
+  # workflow_dispatch 允許我們在 GitHub 網頁上手動點擊執行，方便測試
+  workflow_dispatch: 
+
+jobs:
+  run-python-script:
+    runs-on: ubuntu-latest # 使用最新的 Linux 虛擬機
+
+    steps:
+    - name: 1. 取得 Repository 程式碼
+      uses: actions/checkout@v3
+
+    - name: 2. 建立 Python 環境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 3. 安裝所需套件
+      run: |
+        pip install -r requirements.txt
+
+    - name: 4. 執行 Agent 程式碼
+      run: |
+        python agent.py
